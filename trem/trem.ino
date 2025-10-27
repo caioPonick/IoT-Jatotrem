@@ -9,9 +9,14 @@ const String PASS = "8120gv08";
 
 const int PORT = 1883;
 const String URL = "test.mosquitto.org";
-const String Topic = "DSM2";
+
 const String broker_user = "";
 const String broker_pass = "";
+
+const String MyTopic = "Topico_CaioPonick";
+const String OtherTopic = "Topico_Duncker";
+
+const byte LED_AZUL = 2;
 
 void setup() {
   Serial.begin(115200);
@@ -31,14 +36,34 @@ void setup() {
     delay(200);
     Serial.print(".");
   }
+  mqtt.subscribe(MyTopic.c_str());
+  mqtt.setCallback(callback);
   Serial.println("\n Conectado ao broker com sucesso!");
+
+  pinMode(LED_AZUL, OUTPUT);
 }
 
 void loop() {
-  String mensagem = "Caio: ";
-  mensagem += "oi";
-
-  mqtt.publish(Topic.c_str(),mensagem.c_str());
+  String mensagem = "";
+  if(Serial.available()>0){
+  mensagem += Serial.readStringUntil('\n');
+  mqtt.publish(OtherTopic.c_str(),mensagem.c_str());
+  }
   mqtt.loop();
   delay(2000);
+}
+
+void callback(char* topic, byte* payload, unsigned int length){
+  String mensagem = "";
+  for(int i = 0; i < length; i++){
+    mensagem += (char)payload[i];
+  }
+  Serial.print("Recebido: ");
+  Serial.println(mensagem);
+
+  if(mensagem=="Acender"){
+    digitalWrite(LED_AZUL, HIGH);
+  } else if(mensagem == "Apagar"){
+    digitalWrite(LED_AZUL, LOW);
+  }
 }
