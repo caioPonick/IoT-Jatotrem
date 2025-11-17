@@ -1,97 +1,150 @@
-#include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <WiFi.h>
+#include <ESP32Servo.h>
 
-WiFiClient client;            //cria o cliente wifi
-PubSubClient mqtt(client);    //fala que o mqtt usa o cliene wifi
+#define PINO_LED 2
+#define TRIG 26
+#define ECHO 25
+#define PINO_SERVO 19
+#define PINO_SERVO 18
+#define PINO_PRESENCA 14
 
-const String SSID = "FIESC_IOT_EDU";
-const String PASS = "8120gv08";
+WiFiClientSecure client;
+PubSubClient mqtt(client);
+Servo servo3;
+Servo servo4;
 
-const int PORT = 1883;
-const String URL = "test.mosquitto.org";
+const char* SSID = "FIESC_IOT_EDU";
+const char* PASS = "8120gv08";
 
-const String broker_user = "";
-const String broker_pass = "";
+const char* BROKER_URL  = "e6607d8d5fec40a9974cfc1552a13e2f.s1.eu.hivemq.cloud";
+const int   BROKER_PORT = 8883;
 
-const String MyTopic = "TopicoChat"; //define de onde vou receber as mensagem
-const String OtherTopic = "TopicoChat"; //define para onde vou enviar as mensagens
+const char* BROKER_USER = "vitor_bucci";
+const char* BROKER_PASS = "Integrante1";
 
-const int LED = 2;
+const char* TOPIC_PUBLISH_PRESENCA   = "Projeto/S3/Presenca3";
+const char* TOPIC_PUBLISH_OBJETO     = "Projeto/S3/Ultrassom3";
+const char* TOPICO_SUBSCRIBE = "S1/iluminacao";
+
+const char* TOPIC_PUBLISH_1 = "Projeto/S2/Distancia1";
+const char* TOPIC_PUBLISH_2 = "Projeto/S2/Distancia2";
+
+unsigned long lastPublish = 0;
+int publishInterval = 3000;
+
+long medirDistancia(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duracao = pulseIn(echoPin, HIGH, 30000);
+  long distancia = (duracao * 0.034) / 2;
+  return distancia;
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String mensagem;
+  for (int i = 0; i < length; i++) {
+    mensagem += (char)payload[i];
+  }
+  if (mensagem == "acender") {
+    digitalWrite(PINO_LED, HIGH);
+  } else if (mensagem == "apagar") {
+    digitalWrite(PINO_LED, LOW);
+  } else if (String(topic) == TOPIC_PUBLISH_1){
+    if (mensagem == "objeto_proximo"){
+      servo3.write(90);
+    } else if (mensagem == "objeto_longe"){
+      servo3.write(45);
+    } else if (String(topic) ==TOPIC_PUBLISH_2){
+      if (mensagem == "objeto_proximo"){
+        servo4.write(90);
+      } else if (mensagem == "objeto_longe"){
+        servo4.write(45);
+      }
+    }
+    
+  }
+  Serial.println(mensagem);
+}
+
+void conectarWiFi() {
+  Serial.print("Conectando ao WiFi...");
+  WiFi.begin(SSID, PASS);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println("\nWiFi conectado!");
+}
+
+void conectarMQTT() {
+  mqtt.setServer(BROKER_URL, BROKER_PORT);
+  client.setInsecure();
+  mqtt.setCallback(callback);
+
+  while (!mqtt.connected()) {
+    Serial.print("Conectando ao broker...");
+
+    String clientId = "S3_" + String(random(0xffff), HEX);
+
+    if (mqtt.connect(clientId.c_str(), BROKER_USER, BROKER_PASS)) {
+      Serial.println("Conectado!");
+
+      mqtt.subscribe(TOPICO_SUBSCRIBE);
+      mqtt.subscribe(TOPIC_PUBLISH_1);  // recebe sensor 1 da S2
+      mqtt.subscribe(TOPIC_PUBLISH_2);  // recebe sensor 2 da S2
+      mqtt.subscribe("Projeto/S3/Controle");  // recebe comandos da S2
+
+      Serial.print("Subscrito em: ");
+      Serial.println(TOPICO_SUBSCRIBE);
+
+    } else {
+      Serial.print("Falha. Código: ");
+      Serial.println(mqtt.state());
+      delay(1500);
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Conectando ao WiFi");
-  WiFi.begin(SSID,PASS);
 
-  pinMode(LED,OUTPUT);
+  pinMode(PINO_LED, OUTPUT);
+  pinMode(PINO_PRESENCA, INPUT);
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
 
-  while(WiFi.status() != WL_CONNECTED){
-    Serial.print(".");
-    delay(200);
-  }
+  servo3.attach(PINO_SERVO);
+  servo3.write(0);
 
-  Serial.println("\nConectado!");
-  Serial.println("IP:");
-  Serial.print(WiFi.localIP());
-
-  Serial.print("Conectando ao broker...");
-  mqtt.setServer(URL.c_str(),PORT);
-
-  while(!mqtt.connected()){
-    String ID = "S3-";
-    ID += String(random(0xffff),HEX);
-
-    mqtt.connect(ID.c_str(),broker_user.c_str(),broker_pass.c_str());
-    delay(200);
-    Serial.print(".");
-  }
-  mqtt.subscribe(MyTopic.c_str());
-  mqtt.setCallback(callback);
-  Serial.println("\n Conecado ao broker com sucesso!");
-
+  conectarWiFi();
+  conectarMQTT();
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED){
-
-    Serial.println("Conectando ao WiFi");
-    WiFi.begin(SSID,PASS);
-
-    while(WiFi.status() != WL_CONNECTED){
-      Serial.print(".");
-      delay(200);
-    }
-
-    Serial.println("\nConectado!");
-    Serial.println("IP:");
-    Serial.print(WiFi.localIP());
-  }
-
-  String mensagem = "Marco: ";
-
-  if(Serial.available()>0){
-    mensagem += Serial.readStringUntil('\n'); //lê mensagem digitada
-    mqtt.publish(OtherTopic.c_str(),mensagem.c_str()); //envia a mensagem para o tópico
-  }
+  if (!mqtt.connected()) conectarMQTT();
   mqtt.loop();
-  delay(500);
-}
-
-void callback(char* topic, byte* payload, unsigned int length){
-  String mensagem = "";
-  for(int i = 0; i < length; i++){
-    mensagem += (char)payload[i];
+  long distancia = medirDistancia(TRIG, ECHO);
+  Serial.println(distancia);
+  if (distancia > 0 && distancia < 10) {
+    mqtt.publish(TOPIC_PUBLISH_1, "objeto_proximo");
+  } else if (distancia > 10) {
+    mqtt.publish(TOPIC_PUBLISH_2, "objeto_longe");
   }
-  Serial.print("Recebido: ");
-  Serial.println(mensagem);
-
-  if(mensagem == "Carlos: acender" || mensagem == "Enzo: acender" || mensagem == "Brayan: acender" || mensagem == "Vitor: acender" || mensagem == "Marco: acender"){
-    digitalWrite(LED, HIGH);
-    Serial.println("Led Ligado");
+  unsigned long agora = millis();
+  if (agora - lastPublish >= publishInterval) {
+    lastPublish = agora;
+    int presenca = digitalRead(PINO_PRESENCA);
+    mqtt.publish(TOPIC_PUBLISH_PRESENCA, String(presenca).c_str());
+    Serial.print("Presença publicada: ");
+    Serial.println(presenca);
   }
 
-  if(mensagem == "Carlos: apagar" || mensagem == "Enzo: apagar" || mensagem == "Brayan: apagar" || mensagem == "Vitor: apagar" || mensagem == "Marco: apagar"){
-    digitalWrite(LED, LOW);
-    Serial.println("Led Desligado");
-  }
+  delay(20);
 }
